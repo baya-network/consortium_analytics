@@ -1,7 +1,7 @@
-python==3.6.9
-shapely==1.6.4
-folium==0.10.0
+python==3.6.*
+shapely==1.6.*
+folium==0.10.*
 geopandas==0.4.1
 requests==2.22.0
-pandas==0.25.1
-numpy==1.17.2
+pandas
+numpy
