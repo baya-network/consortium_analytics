@@ -72,14 +72,11 @@ class BldgFinder:
                 closest_bldg = df[df.geometry.intersects(Point(gj['coordinates']))]
 
                 if not closest_bldg.empty:
-                    print("pin inside bldg")
                     return closest_bldg
                 else:
-                    print("pin outside, used closest bldg")
                     closest_bldg = df.loc[df.geometry.distance(Point(gj['coordinates'])).sort_values(ascending=True)[:1].index, :]
                     return closest_bldg
             else:
-                print("poly: centroid to centroid closest bldg")
                 closest_bldg = df.loc[df.centroid.distance(Point(float(obj['lon']), float(obj['lat']))).sort_values(ascending=True)[:1].index, :]
                 return closest_bldg
         except Exception as e:
