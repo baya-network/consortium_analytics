@@ -9,6 +9,12 @@ class BldgFinder:
     city_to_country_mapper = {"berlin": "de", "london": "gb",
                               "amsterdam": "nl", "dublin": "ie",
                               "paris": "fr"}
+    baya_cols_pop_dict = {'Floors': '', 'Height': '', 'Year Built': '', 
+                          'Year Renovated': '', 'Vacancy Rate': '', 'Total Sqft': '',
+                          'Type': '', 'Class': '', 'Frontage': '', 'Depth': '',
+                          'Residential Area': '', 'Office Area': '', 'Retail Area': '',
+                          'Factory Area': '', 'Garage Area': '', 'Storage Area': '',
+                          'Other Area': '', 'Amenities': '', 'Photos': ''}
     
     def __init__(self, city):
         try:
@@ -85,17 +91,23 @@ class BldgFinder:
     
     
     def _create_text_box(self, obj, dfdict):
-        pophtml = """
-            <h3> {title} </h3>
-            <b>Baya ID:</b> {bid}<br>
-            Country: {country}<br>
-            """.format(title=', '.join(obj['display_name'].split(',')[:3]), 
-                       bid=dfdict['id'], country=obj['address']['country'])
-        for k,v in dfdict.items():
-            if ('id' not in k) and ('country' not in k):
+        try:
+            pophtml = """
+                <h3> {title} </h3>
+                <b>Baya ID:</b> {bid}<br>
+                Country: {country}<br>
+                """.format(title=', '.join(obj['display_name'].split(',')[:3]), 
+                           bid=dfdict['id'], country=obj['address']['country'])
+            for k,v in dfdict.items():
+                if ('id' not in k) and ('country' not in k):
+                    pophtml = pophtml + "{}: {}<br>".format(k,v)
+            for k,v in self.baya_cols_pop_dict.items():
                 pophtml = pophtml + "{}: {}<br>".format(k,v)
-        return pophtml    
-    
+            return pophtml
+        except Exception as e:
+            print("Error while creating pop-up box: {}.\n{}".format(e))
+            return np.nan
+
 
     def find(self, addss):
         obj = self._search_address(addss)
@@ -133,7 +145,3 @@ class BldgFinder:
             
         except Exception as e:
             print("Error while displaying bldg on map.\n{}".format(e))
-    
-
-        
-        
