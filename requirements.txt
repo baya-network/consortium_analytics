@@ -1,5 +1,5 @@
-shapely==1.6.4
 python==3.6.9
+shapely==1.6.4
 folium==0.10.0
 geopandas==0.4.1
 requests==2.22.0
