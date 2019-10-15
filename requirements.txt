@@ -1,5 +1,5 @@
 shapely==1.6.*
-folium==0.10.*
+#folium==0.10.*
 geopandas==0.4.1
 requests==2.22.0
 pandas
