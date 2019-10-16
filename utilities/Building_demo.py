@@ -18,8 +18,31 @@ class Building:
         self.set_bldg_metadata()
         self.osm_data = self.get_osm_data()
         self.osm_data = self.make_osm_data_geospatial(self.osm_data)
+        self.ck_by = {
+                        "address": "Address",
+                        "id": "Lease ID",
+                        "suite": "Unit ID",
+                        "tenant_name": "Company Name",
+                        "floor_occupancies": "Floor",
+                        "transaction_size": "Size",
+                        "property_id": "Company ID",
+                        "execution_date": "Signing Date",
+                        "commencement_date": "Start Date",
+                        "expiration_date": "End Date",
+                        "starting_rent": "Starting Rate",
+                        "current_rent": "Current Rate",
+                        "avg_rent": "Average Rate",
+                        "asking_rent": "Asking Rate",
+                        "lease_escalations": "Rate Increase", 
+                        "break_option_dates": "Termination Dates",
+                        "break_option_type": "Termination Type",
+                        "renewal_options": "Extension Options",
+                        "sublease": "Subleased",
+                        "free_rent_type": "Concession Type",
+                        "work_value": "Concession Work Value"
+                    }
         
-        
+
     def get_osm_data(self):
         try:
             comb = pd.read_csv("./data/nyc.csv")
@@ -165,9 +188,18 @@ class Building:
             # self.current_leases.loc[:, "perc_of_bldg_size"] = self.current_leases["transaction_size"].multiply(100).divide(self.rsf))
             # self.current_leases.current_rent.mask(self.current_leases.current_rent < 3, np.nan, inplace=True)
             # self.current_leases.effective_rent.mask(self.current_leases.effective_rent < 3, np.nan, inplace=True)
-
-            return self.current_leases.loc[:, ['tenant_name', 'transaction_size', 'submarket', 'floor_occupancies', 'suite', \
-                                                'current_rent', 'effective_rent', 'expiration_date', 'commencement_date', 'space_type']]
+            
+            self.current_leases = self.current_leases.loc[:, self.ck_by.keys()]
+            self.current_leases.rename(self.ck_by, axis=1, inplace=True)
+            self.current_leases.loc[:, "Address"] = self.address
+            self.current_leases = self.current_leases.loc[:, [u'Lease ID', "Address", u'Company ID', "Company Name", u'Floor', u'Size', u'Unit ID',
+                                                    u'Starting Rate', u'Current Rate',  u'Average Rate',
+                                                    u'Signing Date', u'Start Date', u'End Date', u'Subleased',
+                                                    u'Extension Options', u'Termination Type', u'Termination Dates',
+                                                    u'Asking Rate', u'Rate Increase',
+                                                    u'Concession Type', u'Concession Work Value'
+                                                    ]].sort_values(by=['Start Date', 'Floor', 'Size'])
+            return self.current_leases
         except AttributeError as attr_error:
             return "Error while getting current leases: " + str(attr_error) + ". Try calling get_bldg_data() first."
     
@@ -253,21 +285,26 @@ class Building:
         # revenue form current vacancies
         rcv = tevs * _rent
         return rcv
+
     
-    
-    def get_surrounding_bldgs(self, radius=0.5):
+    def get_surrounding_bldgs(self, radius=0.5, no_of_results=None):
         """ For now the Area is defined as a circle centered at the bldg which method is called upon. Radius is a parameter. 
         TO-DO: allow for Area to be a geojson, either pre-loaded or passed as argument. Area can then be a market, submarket defined by user.
         TO-DO: currently restricted to Manhattan, relax this constraint moving on. Also restricting to Office Category from Reonomy denomination. """
         try:
             radius = radius*1600         # miles to meters conversion
-            bldgs_in_area_query = "SELECT reonomy_id FROM properties_ry AS ry \
+            bldgs_in_area_query = "SELECT reonomy_id, location FROM properties_ry AS ry \
                                         WHERE ST_DWithin(ry.location, ST_SetSRID(ST_Point({}, {}), 4326), {}) \
                                         AND address_city = 'MN' \
                                         AND reonomy_id != '{}' \
                                         AND category = 'Office'".format(self.location.x, self.location.y, radius, self.ry_id)
-            result = pd.read_sql(bldgs_in_area_query, con=self.db_engine)
-            return [x[0] for x in result.values.tolist()]
+            result = gpd.GeoDataFrame.from_postgis(bldgs_in_area_query, con=self.db_engine, geom_col='location')
+            result = result.loc[result.location.distance(self.location).sort_values(ascending=True).index, :]
+            result.columns = ['id', 'location']
+            if not no_of_results:
+                return result
+            else:
+                return result[:no_of_results].id.tolist()
             
         except AttributeError as attr_error:
             return "Error while getting bldgs in area: " + str(attr_error) + ". Try calling get_bldg_data() first."
@@ -287,13 +324,17 @@ class Building:
     def show_surrounding_locations(self, surr_ids):
         try:
             test_map = folium.Map(location=[self.location.y, self.location.x], zoom_start=16)
-            obj_point = folium.Marker(location = (self.location.y, self.location.x), tooltip=self.address)
+            obj_point = folium.Marker(location = (self.location.y, self.location.x), tooltip=self.address,
+                                        popup=folium.Popup(self.create_text_box(self.ry_data.to_dict()['characteristics']), max_width=300)
+                                    )
             obj_point.add_to(test_map)
             for b in surr_ids:
                 B = Building(b)
+                B_data = B.get_bldg_data()
                 folium.Circle(radius=20,
                                 location=[B.location.y, B.location.x],
                                 tooltip=B.address,
+                                popup=folium.Popup(self.create_text_box(B.ry_data.to_dict()['characteristics']), max_width=300),
                                 color='crimson',
                                 fill=True
                             ).add_to(test_map)
@@ -310,11 +351,62 @@ class Building:
         obj_point = folium.Marker(location = (self.location.y, self.location.x))
         obj_point.add_to(test_map)
 
-        bldg_poly = folium.Polygon(locations = self.closest_bldg.geo_inv.values.tolist(),
-                                color="red", fill=True, fill_color='#FF0000')
+        if not hasattr(self, 'ry_data'):
+            self.get_bldg_data()
+        bldg_info = self.ry_data.to_dict()['characteristics']
 
+        bldg_poly = folium.Polygon(locations = self.closest_bldg.geo_inv.values.tolist(),
+                                color="red", fill=True, fill_color='#FF0000',
+                                tooltip=folium.Tooltip(bldg_info['Address']),
+                                popup=folium.Popup(self.create_text_box(bldg_info),
+                                max_width=300))
         bldg_poly.add_to(test_map)
         display(test_map)
+
+
+    def create_text_box(self, bldg_data):
+        try:
+            pophtml = """
+                <h3> {title} </h3>
+                <b>Baya ID:</b>   {bid}<br>
+                """.format(title=bldg_data['Address'], 
+                        bid=bldg_data['Building ID'][:8])
+            for k,v in bldg_data.items():
+                if ('Address' not in k) and ('Building' not in k):
+                    pophtml = pophtml + "{}:   {}<br>".format(k,v)
+            return pophtml
+        except Exception as e:
+            print("Error while creating pop-up box: {}.\n{}".format(e))
+            return np.nan
+
+    def get_surrounding_current_leases(self, surr_ids):
+        today = dt.datetime.today().strftime('%Y-%m-%d')
+        market_rent_query = "SELECT * \
+                                FROM leases_ck AS lea \
+                                JOIN ck_to_ry AS mt on mt.ck_id = lea.property_id \
+                                JOIN (SELECT address, rsf, reonomy_id FROM properties_ry) as ryrsf ON ryrsf.reonomy_id = mt.ry_id \
+                                WHERE mt.ry_id IN {} \
+                                AND lea.expiration_date > '{}' \
+                                AND lea.commencement_date <= '{}'\
+                                ".format(tuple([str(b) for b in surr_ids]), today, today)
+        self.surrounding_current_leases = pd.read_sql(market_rent_query, con=self.db_engine)
+        # self.current_leases.current_rent.mask(self.current_leases.current_rent < 3, np.nan, inplace=True)
+        # self.current_leases.effective_rent.mask(self.current_leases.effective_rent < 3, np.nan, inplace=True)
+
+        if not hasattr(self, 'current_leases'):
+            self.get_current_leases()
+ 
+        self.surrounding_current_leases = self.surrounding_current_leases.loc[:, self.ck_by.keys()]
+        self.surrounding_current_leases.rename(self.ck_by, axis=1, inplace=True)
+        self.surrounding_current_leases = self.surrounding_current_leases.loc[:, [u'Lease ID', "Address", u'Company ID', "Company Name", u'Floor', u'Size', u'Unit ID',
+                                                                                    u'Starting Rate', u'Current Rate',  u'Average Rate',
+                                                                                    u'Signing Date', u'Start Date', u'End Date', u'Subleased',
+                                                                                    u'Extension Options', u'Termination Type', u'Termination Dates',
+                                                                                    u'Asking Rate', u'Rate Increase',
+                                                                                    u'Concession Type', u'Concession Work Value'
+                                                                                ]].sort_values(by=['Start Date', 'Floor', 'Size'])
+        return self.current_leases.append(self.surrounding_current_leases)
+        
      
 
 
