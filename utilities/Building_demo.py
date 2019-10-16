@@ -4,6 +4,7 @@ from dateutil.relativedelta import relativedelta
 import pandas as pd, geopandas as gpd, numpy as np
 from sqlalchemy import create_engine
 import folium
+from shapely.geometry import Polygon, Point
 
 class Building:
     """ Building Class with utility to query all data related to a building, plus most common queries (active leases, active listings, 
@@ -15,6 +16,32 @@ class Building:
         # Connection to DB, fixed for now.Connecting to our main DB. TO-DO. Connect to follow-up test DB.
         self.db_engine = create_engine(os.environ["DATABASE_URL_silhouetted"])
         self.set_bldg_metadata()
+        self.osm_data = self.get_osm_data()
+        self.osm_data = self.make_osm_data_geospatial(self.osm_data)
+        
+        
+    def get_osm_data(self):
+        try:
+            comb = pd.read_csv("./data/nyc.csv")
+            return comb
+        except KeyError as e:
+            print("Error while importing building data for {}.\n{}".format(self.country, e))
+            
+            
+    def make_osm_data_geospatial(self, df):
+        try:
+            df.geo.update(df.geo.apply(eval))
+            # Making a Geopandas from bldg data
+            df.loc[:, "geometry"] = df.geo.apply(lambda x: Polygon(x['coordinates'][0]))
+            gdf = gpd.GeoDataFrame(df, geometry=df.geometry)
+            ## Adding geo-inverted columns (for plotting with folium)
+            gdf.loc[:, "geo_inv"] = gdf.geo.apply(lambda c: [ [(a[1],a[0]) for a in b] for b in c['coordinates']][0])
+            ## Adding centroid column
+            # required to look for closest polygon when address does not intersect
+            gdf.loc[:, "centroid"] = gdf.geometry.centroid
+            return gdf
+        except Exception as e:
+            print("Error while making bldg data geospatial.\n{}".format(e))
         
     
     def set_bldg_metadata(self):
@@ -39,21 +66,61 @@ class Building:
         except Exception as e:
             print("Error when setting bldg metadata: " + str(e))
 
-    
-    def get_ry_data(self):
+    def get_closest_bldg(self):
+        closest = None
+        try:
+            closest = self.osm_data[self.osm_data.geometry.contains(self.location)]
+            if closest.empty:
+                closest = self.osm_data[self.osm_data.geometry.insersects(self.location)]
+            if closest.empty:
+                closest = self.osm_data[self.osm_data.geometry.touches(self.location)]
+            if closest.empty:
+                closest = self.osm_data[self.osm_data.geometry.insersects(self.location)]
+            if closest.empty or closest.shape[0] > 1:
+                closest = self.osm_data.loc[self.osm_data.geometry.distance(self.location).sort_values(ascending=True)[:1].index, :]
+            self.closest_bldg = closest
+            return self.closest_bldg
+        except Exception as e:
+            print("Error while getting closest building: {}.\n{}".format(e))
+            return np.nan
+
+    def get_bldg_data(self):
         ry_data_query = "SELECT * FROM properties_ry WHERE reonomy_id = '{}'".format(self.ry_id)
         self.ry_data = gpd.GeoDataFrame.from_postgis(ry_data_query, con=self.db_engine, geom_col='location').transpose()
         self.ry_data.columns = ['characteristics']
+        ry_by = {"reonomy_id":"Building ID",
+                    "lot_area":"Lot ID",
+                    "address":"Address",
+                    "floors":"Floors",
+                    "year_built":"Year Built",
+                    "year_renovated":"Year Renovated",
+                    "rsf":"Total Sqft",
+                    "category":"Type",
+                    "class":"Class",
+                    "lot_frontage":"Frontage",
+                    "lot_depth":"Depth",
+                    "residential_area":"Residential Area",
+                    "office_area":"Office Area",
+                    "retail_area":"Retail Area",
+                    "factory_area":"Factory Area",
+                    "garage_area":"Garage Area",
+                    "storage_area":"Storage Area",
+                    "other_area":"Other Area"}
+        self.ry_data = self.ry_data.loc[ry_by.keys(), :]
+        self.ry_data.rename(ry_by, axis=0, inplace=True)
+        self.ry_data.append(pd.DataFrame.from_dict({"Height": 849, "Vacancy Rate": 7, "Amenities":{"elevator": True, "gym": True} ,"Photos": "url"}
+                        , orient='index', columns=['characteristics']))
         return self.ry_data
+
     
     def get_financials(self):
         if not hasattr(self, 'ry_data'):
-            self.get_ry_data()
+            self.get_bldg_data()
         return self.ry_data.iloc[34:51, :].append(self.ry_data.iloc[81:89, :])
     
     def get_contacts(self):
         if not hasattr(self, 'ry_data'):
-            self.get_ry_data()
+            self.get_bldg_data()
         return self.ry_data.iloc[49:81, :]
             
 
@@ -102,7 +169,7 @@ class Building:
             return self.current_leases.loc[:, ['tenant_name', 'transaction_size', 'submarket', 'floor_occupancies', 'suite', \
                                                 'current_rent', 'effective_rent', 'expiration_date', 'commencement_date', 'space_type']]
         except AttributeError as attr_error:
-            return "Error while getting current leases: " + str(attr_error) + ". Try calling get_ry_data() first."
+            return "Error while getting current leases: " + str(attr_error) + ". Try calling get_bldg_data() first."
     
 
     def get_all_vacancies(self):
@@ -127,7 +194,7 @@ class Building:
             self.current_vacancies.loc[:, "perc_of_bldg_size"] = self.current_vacancies["size"].multiply(100).divide(self.rsf)
             return self.current_vacancies.loc[:, ['floor', 'floor_order', 'unit', 'unit_type', 'size', 'perc_of_bldg_size', 'rate_per_sqft_per_year', 'details', 'touched_at', 'lease_expiration']]
         except AttributeError as attr_error:
-            return "Error while getting current leases: " + str(attr_error) + ". Try calling get_ry_data() first."
+            return "Error while getting current leases: " + str(attr_error) + ". Try calling get_bldg_data() first."
 
 
     ######################################################## Baya Layers ##################################################
@@ -203,7 +270,7 @@ class Building:
             return [x[0] for x in result.values.tolist()]
             
         except AttributeError as attr_error:
-            return "Error while getting bldgs in area: " + str(attr_error) + ". Try calling get_ry_data() first."
+            return "Error while getting bldgs in area: " + str(attr_error) + ". Try calling get_bldg_data() first."
         
     
     def show_location(self):
@@ -233,6 +300,21 @@ class Building:
             display(test_map)
         except Exception as e:
             print("Error while displaying bldg on map.\n{}".format(e))
+
+    def make_map(self):
+    #    pophtml = self._create_text_box(obj, closest_bldg.iloc[:, :-3]\
+    #                                  .drop('geo', axis=1).dropna(axis=1).to_dict(orient='rows')[0])
+        self.get_closest_bldg()
+        test_map = folium.Map(location=[self.location.y, self.location.x], zoom_start=16)
+
+        obj_point = folium.Marker(location = (self.location.y, self.location.x))
+        obj_point.add_to(test_map)
+
+        bldg_poly = folium.Polygon(locations = self.closest_bldg.geo_inv.values.tolist(),
+                                color="red", fill=True, fill_color='#FF0000')
+
+        bldg_poly.add_to(test_map)
+        display(test_map)
      
 
 
