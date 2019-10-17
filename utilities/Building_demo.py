@@ -6,6 +6,7 @@ from sqlalchemy import create_engine
 import folium
 from shapely.geometry import Polygon, Point
 
+
 class Building:
     """ Building Class with utility to query all data related to a building, plus most common queries (active leases, active listings, 
     mean building rent, upcoming lease expirations, etc.) along with information about buildings & tenants nearby. """
@@ -133,6 +134,24 @@ class Building:
         self.ry_data.rename(ry_by, axis=0, inplace=True)
         self.ry_data.append(pd.DataFrame.from_dict({"Height": 849, "Vacancy Rate": 7, "Amenities":{"elevator": True, "gym": True} ,"Photos": "url"}
                         , orient='index', columns=['characteristics']))
+        self.ry_data = self.ry_data.loc[['Building ID',
+                                            'Lot ID',
+                                            'Address',
+                                            'Floors',
+                                            'Year Built',
+                                            'Year Renovated',
+                                            'Total Sqft',
+                                            'Type',
+                                            'Class',
+                                            'Frontage',
+                                            'Depth'
+                                            'Residential Area',
+                                            'Office Area',
+                                            'Retail Area',
+                                            'Factory Area',
+                                            'Garage Area',
+                                            'Storage Area',
+                                            'Other Area'], :]
         return self.ry_data
 
     
@@ -326,21 +345,28 @@ class Building:
             test_map = folium.Map(location=[self.location.y, self.location.x], zoom_start=16)
             obj_point = folium.Marker(location = (self.location.y, self.location.x), tooltip=self.address,
                                         popup=folium.Popup(self.create_text_box(self.ry_data.to_dict()['characteristics']), max_width=300)
-                                    )
-            obj_point.add_to(test_map)
+                                    ).add_to(test_map)
+            if not hasattr(self, 'ry_data'):
+                self.get_bldg_data()
+            bldg_info = self.ry_data.to_dict()['characteristics']
+            bldg_poly = folium.Polygon(locations = self.closest_bldg.geo_inv.values.tolist(),
+                                color="red", fill=True, fill_color='#FF0000',
+                                tooltip=folium.Tooltip(bldg_info['Address']),
+                                popup=folium.Popup(self.create_text_box(bldg_info),
+                                max_width=300)).add_to(test_map)
+
             for b in surr_ids:
                 B = Building(b)
-                B_data = B.get_bldg_data()
-                folium.Circle(radius=20,
-                                location=[B.location.y, B.location.x],
-                                tooltip=B.address,
-                                popup=folium.Popup(self.create_text_box(B.ry_data.to_dict()['characteristics']), max_width=300),
-                                color='crimson',
-                                fill=True
-                            ).add_to(test_map)
+                B_data = B.get_bldg_data().to_dict()['characteristics']
+                B.get_closest_bldg()
+                bldg_poly = folium.Polygon(locations = B.closest_bldg.geo_inv.values.tolist(),
+                                color="red", fill=True, fill_color='#FF0000',
+                                tooltip=folium.Tooltip(B_data['Address']),
+                                popup=folium.Popup(self.create_text_box(B_data), 
+                                max_width=300)).add_to(test_map)
             display(test_map)
         except Exception as e:
-            print("Error while displaying bldg on map.\n{}".format(e))
+            print("Error while displaying surroundings buildings on map.\n{}".format(e))
 
     def make_map(self):
     #    pophtml = self._create_text_box(obj, closest_bldg.iloc[:, :-3]\
@@ -371,6 +397,23 @@ class Building:
                 <b>Baya ID:</b>   {bid}<br>
                 """.format(title=bldg_data['Address'], 
                         bid=bldg_data['Building ID'][:8])
+            # pophtml = pophtml + """Lot ID: {Lot ID}<br>
+            #     Address: {Address}<br>
+            #     Floors: {Floors}<br>
+            #     Year Built: {Year Built}<br>
+            #     Year Renovated: {Year Renovated}<br>
+            #     Total Sqft: {Total Sqft}<br>
+            #     Type: {Type}<br>
+            #     Class: {Class}<br>
+            #     Frontage: {Frontage}<br>
+            #     Depth: {Depth}<br>
+            #     Residential Area: {Residential Area}<br>
+            #     Office Area: {Office Area}<br>
+            #     Retail Area: {Retail Area}<br>
+            #     Factory Area: {Factory Area}<br>
+            #     Garage Area: {Garage Area}<br>
+            #     Storage Area: {Storage Area}<br>
+            #     Other Area: {Other Area}<br>""".format(bldg_data)
             for k,v in bldg_data.items():
                 if ('Address' not in k) and ('Building' not in k):
                     pophtml = pophtml + "{}:   {}<br>".format(k,v)
@@ -405,7 +448,32 @@ class Building:
                                                                                     u'Asking Rate', u'Rate Increase',
                                                                                     u'Concession Type', u'Concession Work Value'
                                                                                 ]].sort_values(by=['Start Date', 'Floor', 'Size'])
-        return self.current_leases.append(self.surrounding_current_leases)
+        self.surrounding_current_leases = self.current_leases.append(self.surrounding_current_leases)
+        return self.surrounding_current_leases
+
+
+    def show_lease_comps(self):
+        if not hasattr(self, 'surrounding_current_leases'):
+            self.get_surrounding_current_leases(self.get_surrounding_bldgs(0.1, 5))
+        comps = self.surrounding_current_leases
+        comps = comps.loc[:, ["Address", "Starting Rate", "Size", "Start Date", "End Date"]]
+        comps.loc[:, "Rent"] = comps["Starting Rate"].multiply(comps["Size"])
+        comps
+        cq = pd.concat([pd.DataFrame({'Quarter': pd.date_range(row['Start Date'], row['End Date'], freq='Q'),
+                                'Address': row.Address,
+                                'Rent': row.Rent
+                                }, columns=['Quarter', 'Address', 'Rent']
+                                ) for i, row in comps.iterrows()], ignore_index=True)
+        cq = cq.groupby(['Address', 'Quarter']).sum()
+        cq.reset_index(inplace=True)
+        cq = cq.pivot(index='Quarter', columns='Address', values='Rent')
+        cq.loc[:, "Area Average"] = cq.mean(axis=1)
+        ax = cq.plot(figsize=(18, 6), title="Received and Projected Rent", grid=True, 
+        xlim=(pd.datetime(2009, 1, 31), pd.datetime(2029, 3, 31)),
+        xticks=[pd.datetime(x, 1, 1) for x in np.arange(2009,2029,1)])
+        ax.set_xlabel("Year")
+        ax.set_ylabel("Rent in Tens of Millions USD")
+        display()
         
      
 
