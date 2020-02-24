@@ -7,7 +7,7 @@ asn1crypto==0.24.0
 attrs==19.1.0
 backcall==0.1.0
 blas==1.0
-bleach==3.1.0
+bleach==3.1.1
 branca==0.3.1
 bzip2==1.0.8
 ca-certificates==2019.8.28
