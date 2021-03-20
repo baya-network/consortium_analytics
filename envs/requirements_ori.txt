@@ -46,7 +46,7 @@ ipykernel==5.1.2
 ipython==7.8.0
 ipython_genutils==0.2.0
 jedi==0.15.1
-jinja2==2.10.1
+jinja2==2.11.3
 jpeg==9b
 json-c==0.13.1
 jsonschema==3.0.2
