@@ -112,7 +112,7 @@ prompt_toolkit==2.0.9
 psycopg2==2.8.3
 ptyprocess==0.6.0
 pycparser==2.19
-pygments==2.4.2
+pygments==2.7.4
 pyopenssl==19.0.0
 pyparsing==2.4.2
 pyproj==1.9.6
