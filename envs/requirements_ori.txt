@@ -89,7 +89,7 @@ nb_conda_kernels==2.2.2
 nbconvert==5.6.0
 nbformat==4.4.0
 ncurses==6.1
-notebook==6.0.1
+notebook==6.4.10
 numpy==1.17.2
 numpy-base==1.17.2
 openjpeg==2.3.0
