@@ -12,7 +12,7 @@ branca==0.3.1
 bzip2==1.0.8
 ca-certificates==2019.8.28
 cairo==1.14.12
-certifi==2019.9.11
+certifi==2022.12.7
 cffi==1.12.3
 chardet==3.0.4
 click==7.0
